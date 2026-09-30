@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import Head from "next/head";
 import Link from "next/link";
 import { useRouter } from "next/router";
+import { useCart } from "../context/CartContext";
 import { formatRupiah } from "../lib/format";
 import { PAYMENT_METHODS } from "../lib/paymentMethods";
 
@@ -26,6 +27,7 @@ function ChannelLogo({ logo }) {
 export default function Payment() {
   const router = useRouter();
   const { checkoutId } = router.query;
+  const { clearCart } = useCart();
 
   // Data checkout dari database
   const [checkout, setCheckout] = useState(null);
@@ -40,7 +42,6 @@ export default function Payment() {
   const [errors, setErrors] = useState({});
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
-  const [savedPayment, setSavedPayment] = useState(null);
 
   const nameRef = useRef(null);
   const phoneRef = useRef(null);
@@ -129,11 +130,11 @@ export default function Payment() {
 
       if (!res.ok) throw new Error(data.message || "Gagal membuat pembayaran");
 
-      // SEMENTARA: di Soal 4, di sini user diarahkan ke halaman pembayaran Xendit
-      setSavedPayment(data);
+      // Tagihan berhasil dibuat: kosongkan keranjang, lalu pindah ke halaman Xendit
+      clearCart();
+      window.location.href = data.invoiceUrl;
     } catch (err) {
       setSubmitError(err.message);
-    } finally {
       setSubmitting(false);
     }
   }
@@ -247,29 +248,17 @@ export default function Payment() {
 
             {/* Confirm & Pay */}
             <div className="bottom-bar">
-              {savedPayment ? (
-                <div>
-                  <p style={{ marginBottom: 8 }}>
-                    Pesanan tersimpan. Status pembayaran:{" "}
-                    <span className="status pending">{savedPayment.status}</span>
-                  </p>
-                  <p className="product-desc">ID: {savedPayment.externalId}</p>
-                </div>
-              ) : (
-                <>
-                  <button
-                    className="btn btn-primary btn-block"
-                    onClick={handleConfirm}
-                    disabled={submitting}
-                  >
-                    {submitting ? "Memproses..." : "Confirm & Pay"}
-                  </button>
-                  {hasErrors && (
-                    <p className="error">Lengkapi data yang ditandai merah terlebih dahulu.</p>
-                  )}
-                  {submitError && <p className="error">{submitError}</p>}
-                </>
+              <button
+                className="btn btn-primary btn-block"
+                onClick={handleConfirm}
+                disabled={submitting}
+              >
+                {submitting ? "Membuat tagihan..." : "Confirm & Pay"}
+              </button>
+              {hasErrors && (
+                <p className="error">Lengkapi data yang ditandai merah terlebih dahulu.</p>
               )}
+              {submitError && <p className="error">{submitError}</p>}
             </div>
           </>
         )}
