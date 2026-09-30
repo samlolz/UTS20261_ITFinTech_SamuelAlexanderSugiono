@@ -10,7 +10,7 @@ export function CartProvider({ children }) {
   // Ambil data keranjang yang tersimpan di browser saat pertama kali dibuka
   useEffect(() => {
     try {
-      const saved = localStorage.getItem("cart");
+      const saved = localStorage.getItem("sams-cart");
       if (saved) setItems(JSON.parse(saved));
     } catch (error) {
       console.error("Gagal membaca keranjang:", error);
@@ -21,7 +21,7 @@ export function CartProvider({ children }) {
   // Simpan keranjang ke browser setiap kali isinya berubah
   useEffect(() => {
     if (loaded) {
-      localStorage.setItem("cart", JSON.stringify(items));
+      localStorage.setItem("sams-cart", JSON.stringify(items));
     }
   }, [items, loaded]);
 

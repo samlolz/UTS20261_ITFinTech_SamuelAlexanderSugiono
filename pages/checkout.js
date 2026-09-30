@@ -1,3 +1,4 @@
+import { useState } from "react";
 import Head from "next/head";
 import Link from "next/link";
 import { useRouter } from "next/router";
@@ -9,6 +10,32 @@ export default function Checkout() {
   const router = useRouter();
   const { items, loaded, updateQuantity, subtotal } = useCart();
   const { tax, total } = calculateTotals(subtotal);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState("");
+
+  // Simpan checkout ke database, lalu lanjut ke halaman Payment
+  async function handleContinue() {
+    setSubmitting(true);
+    setError("");
+
+    try {
+      const res = await fetch("/api/checkout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          items: items.map((i) => ({ id: i.id, quantity: i.quantity })),
+        }),
+      });
+      const data = await res.json();
+
+      if (!res.ok) throw new Error(data.message || "Gagal menyimpan checkout");
+
+      router.push(`/payment?checkoutId=${data.checkoutId}`);
+    } catch (err) {
+      setError(err.message);
+      setSubmitting(false);
+    }
+  }
 
   return (
     <div className="page">
@@ -25,7 +52,6 @@ export default function Checkout() {
           <span className="top-bar-title">Checkout</span>
         </div>
 
-        {/* Tunggu data keranjang selesai dibaca dari browser */}
         {!loaded ? (
           <p className="empty">Memuat...</p>
         ) : items.length === 0 ? (
@@ -85,10 +111,12 @@ export default function Checkout() {
             <div className="bottom-bar">
               <button
                 className="btn btn-primary btn-block"
-                onClick={() => router.push("/payment")}
+                onClick={handleContinue}
+                disabled={submitting}
               >
-                Continue to Payment →
+                {submitting ? "Memproses..." : "Continue to Payment →"}
               </button>
+              {error && <p className="error">{error}</p>}
             </div>
           </>
         )}

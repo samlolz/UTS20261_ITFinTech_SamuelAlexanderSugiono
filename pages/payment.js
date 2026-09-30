@@ -1,43 +1,144 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Head from "next/head";
 import Link from "next/link";
-import { useCart } from "../context/CartContext";
+import { useRouter } from "next/router";
 import { formatRupiah } from "../lib/format";
-import { calculateTotals, SHIPPING_FEE } from "../lib/pricing";
+import { PAYMENT_METHODS } from "../lib/paymentMethods";
 
-// Pilihan metode pembayaran (value dipakai nanti saat integrasi Xendit)
-const paymentMethods = [
-  { value: "CARD", label: "Credit/Debit Card" },
-  { value: "EWALLET", label: "E-Wallet / QRIS (OVO, DANA, ShopeePay, dll.)" },
-  { value: "BANK_TRANSFER", label: "Bank Transfer (Virtual Account)" },
-];
+// Menampilkan logo dari public/logos/. Kalau file belum ada, tampilkan nama merek.
+function ChannelLogo({ logo }) {
+  const [available, setAvailable] = useState(false);
+
+  useEffect(() => {
+    const img = new window.Image();
+    img.onload = () => setAvailable(true);
+    img.onerror = () => setAvailable(false);
+    img.src = logo.file;
+  }, [logo.file]);
+
+  return (
+    <span className="logo-chip" title={logo.name}>
+      {available ? <img src={logo.file} alt={logo.name} /> : logo.name}
+    </span>
+  );
+}
 
 export default function Payment() {
-  const { items, loaded, subtotal } = useCart();
-  const { total: itemsTotal } = calculateTotals(subtotal);
-  const grandTotal = itemsTotal + SHIPPING_FEE;
+  const router = useRouter();
+  const { checkoutId } = router.query;
 
+  // Data checkout dari database
+  const [checkout, setCheckout] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+
+  // Form
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [address, setAddress] = useState("");
   const [method, setMethod] = useState("CARD");
-  const [error, setError] = useState("");
+  const [errors, setErrors] = useState({});
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState("");
+  const [savedPayment, setSavedPayment] = useState(null);
 
-  function handleConfirm() {
-    // Validasi sederhana: semua data pengiriman wajib diisi
-    if (!name.trim() || !phone.trim() || !address.trim()) {
-      setError("Lengkapi nama, nomor HP, dan alamat pengiriman terlebih dahulu.");
+  const nameRef = useRef(null);
+  const phoneRef = useRef(null);
+  const addressRef = useRef(null);
+  const fieldRefs = { name: nameRef, phone: phoneRef, address: addressRef };
+
+  // Ambil data checkout berdasarkan checkoutId di URL
+  useEffect(() => {
+    if (!router.isReady) return;
+
+    if (!checkoutId) {
+      setLoadError("Data checkout tidak ditemukan.");
+      setLoading(false);
       return;
     }
-    setError("");
 
-    // SEMENTARA: nanti di Soal 4 bagian ini diganti dengan pembuatan tagihan Xendit
-    alert(
-      `Data siap dibayar:\n` +
-        `Nama: ${name}\nMetode: ${method}\nTotal: ${formatRupiah(grandTotal)}\n\n` +
-        `(Integrasi Xendit dibuat di Soal 4)`
-    );
+    fetch(`/api/checkout/${checkoutId}`)
+      .then(async (res) => {
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.message || "Gagal memuat checkout");
+        return data;
+      })
+      .then((data) => setCheckout(data))
+      .catch((err) => setLoadError(err.message))
+      .finally(() => setLoading(false));
+  }, [router.isReady, checkoutId]);
+
+  function validate() {
+    const newErrors = {};
+
+    if (!name.trim()) {
+      newErrors.name = "Nama penerima wajib diisi.";
+    }
+
+    const cleanPhone = phone.replace(/[\s-]/g, "");
+    if (!cleanPhone) {
+      newErrors.phone = "Nomor HP wajib diisi.";
+    } else if (!/^(\+62|62|0)8\d{7,11}$/.test(cleanPhone)) {
+      newErrors.phone = "Format nomor HP tidak valid (contoh: 08123456789).";
+    }
+
+    if (!address.trim()) {
+      newErrors.address = "Alamat pengiriman wajib diisi.";
+    } else if (address.trim().length < 10) {
+      newErrors.address = "Alamat terlalu pendek, tulis alamat lengkap.";
+    }
+
+    return newErrors;
   }
+
+  function handleChange(field, setter) {
+    return (e) => {
+      setter(e.target.value);
+      if (errors[field]) {
+        setErrors((prev) => ({ ...prev, [field]: undefined }));
+      }
+    };
+  }
+
+  async function handleConfirm() {
+    const newErrors = validate();
+    setErrors(newErrors);
+
+    const firstInvalid = ["name", "phone", "address"].find((f) => newErrors[f]);
+    if (firstInvalid) {
+      const el = fieldRefs[firstInvalid].current;
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      el.focus({ preventScroll: true });
+      return;
+    }
+
+    setSubmitting(true);
+    setSubmitError("");
+
+    try {
+      const res = await fetch("/api/payment/create", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          checkoutId,
+          customer: { name, phone, address },
+          paymentMethod: method,
+        }),
+      });
+      const data = await res.json();
+
+      if (!res.ok) throw new Error(data.message || "Gagal membuat pembayaran");
+
+      // SEMENTARA: di Soal 4, di sini user diarahkan ke halaman pembayaran Xendit
+      setSavedPayment(data);
+    } catch (err) {
+      setSubmitError(err.message);
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  const hasErrors = Object.values(errors).some(Boolean);
 
   return (
     <div className="page">
@@ -54,13 +155,13 @@ export default function Payment() {
           <span className="top-bar-title">Secure Checkout</span>
         </div>
 
-        {!loaded ? (
+        {loading ? (
           <p className="empty">Memuat...</p>
-        ) : items.length === 0 ? (
+        ) : loadError ? (
           <div className="empty">
-            <p>Keranjang masih kosong.</p>
-            <Link href="/" className="btn" style={{ marginTop: 12 }}>
-              Pilih Menu
+            <p>{loadError}</p>
+            <Link href="/checkout" className="btn" style={{ marginTop: 12 }}>
+              Kembali ke Checkout
             </Link>
           </div>
         ) : (
@@ -68,69 +169,107 @@ export default function Payment() {
             {/* Shipping Address */}
             <div className="section">
               <h2 className="section-title">Shipping Address</h2>
+
               <input
-                className="field"
+                ref={nameRef}
+                className={`field ${errors.name ? "invalid" : ""}`}
                 type="text"
                 placeholder="Nama penerima"
                 value={name}
-                onChange={(e) => setName(e.target.value)}
+                onChange={handleChange("name", setName)}
               />
+              {errors.name && <p className="field-error">{errors.name}</p>}
+
               <input
-                className="field"
+                ref={phoneRef}
+                className={`field ${errors.phone ? "invalid" : ""}`}
                 type="tel"
                 placeholder="Nomor HP (contoh: 08123456789)"
                 value={phone}
-                onChange={(e) => setPhone(e.target.value)}
+                onChange={handleChange("phone", setPhone)}
               />
+              {errors.phone && <p className="field-error">{errors.phone}</p>}
+
               <textarea
-                className="field"
+                ref={addressRef}
+                className={`field ${errors.address ? "invalid" : ""}`}
                 rows={3}
                 placeholder="Alamat lengkap"
                 value={address}
-                onChange={(e) => setAddress(e.target.value)}
+                onChange={handleChange("address", setAddress)}
               />
+              {errors.address && <p className="field-error">{errors.address}</p>}
             </div>
 
             {/* Payment Method */}
             <div className="section">
               <h2 className="section-title">Payment Method</h2>
-              {paymentMethods.map((pm) => (
-                <label key={pm.value} className="radio-option">
-                  <input
-                    type="radio"
-                    name="paymentMethod"
-                    value={pm.value}
-                    checked={method === pm.value}
-                    onChange={() => setMethod(pm.value)}
-                  />
-                  <span>{pm.label}</span>
+              {PAYMENT_METHODS.map((pm) => (
+                <label
+                  key={pm.value}
+                  className={`method-card ${method === pm.value ? "selected" : ""}`}
+                >
+                  <div className="method-header">
+                    <input
+                      type="radio"
+                      name="paymentMethod"
+                      value={pm.value}
+                      checked={method === pm.value}
+                      onChange={() => setMethod(pm.value)}
+                    />
+                    <span>{pm.label}</span>
+                  </div>
+                  <div className="logo-row">
+                    {pm.logos.map((logo) => (
+                      <ChannelLogo key={logo.name} logo={logo} />
+                    ))}
+                  </div>
                 </label>
               ))}
             </div>
 
-            {/* Order Summary */}
+            {/* Order Summary (dari database) */}
             <div className="section">
               <h2 className="section-title">Order Summary</h2>
               <div className="summary-row">
                 <span>Item(s)</span>
-                <span>{formatRupiah(itemsTotal)}</span>
+                <span>{formatRupiah(checkout.subtotal + checkout.tax)}</span>
               </div>
               <div className="summary-row">
                 <span>Shipping</span>
-                <span>{formatRupiah(SHIPPING_FEE)}</span>
+                <span>{formatRupiah(checkout.shippingFee)}</span>
               </div>
               <div className="summary-row total">
                 <span>Total</span>
-                <span>{formatRupiah(grandTotal)}</span>
+                <span>{formatRupiah(checkout.total)}</span>
               </div>
             </div>
 
             {/* Confirm & Pay */}
             <div className="bottom-bar">
-              <button className="btn btn-primary btn-block" onClick={handleConfirm}>
-                Confirm &amp; Pay
-              </button>
-              {error && <p className="error">{error}</p>}
+              {savedPayment ? (
+                <div>
+                  <p style={{ marginBottom: 8 }}>
+                    Pesanan tersimpan. Status pembayaran:{" "}
+                    <span className="status pending">{savedPayment.status}</span>
+                  </p>
+                  <p className="product-desc">ID: {savedPayment.externalId}</p>
+                </div>
+              ) : (
+                <>
+                  <button
+                    className="btn btn-primary btn-block"
+                    onClick={handleConfirm}
+                    disabled={submitting}
+                  >
+                    {submitting ? "Memproses..." : "Confirm & Pay"}
+                  </button>
+                  {hasErrors && (
+                    <p className="error">Lengkapi data yang ditandai merah terlebih dahulu.</p>
+                  )}
+                  {submitError && <p className="error">{submitError}</p>}
+                </>
+              )}
             </div>
           </>
         )}

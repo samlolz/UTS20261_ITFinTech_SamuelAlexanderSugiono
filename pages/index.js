@@ -1,17 +1,31 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Head from "next/head";
 import Link from "next/link";
-import products from "../data/products";
 import { useCart } from "../context/CartContext";
 import { formatRupiah } from "../lib/format";
 
-// Daftar kategori diambil otomatis dari data produk
-const categories = ["All", ...new Set(products.map((p) => p.category))];
-
 export default function SelectItem() {
   const { items, addItem, updateQuantity, totalItems } = useCart();
+  const [products, setProducts] = useState([]);
+  const [loadingProducts, setLoadingProducts] = useState(true);
+  const [loadError, setLoadError] = useState("");
   const [activeCategory, setActiveCategory] = useState("All");
   const [search, setSearch] = useState("");
+
+  // Ambil daftar produk dari database lewat API
+  useEffect(() => {
+    fetch("/api/products")
+      .then((res) => {
+        if (!res.ok) throw new Error("Gagal memuat");
+        return res.json();
+      })
+      .then((data) => setProducts(data))
+      .catch(() => setLoadError("Gagal memuat menu. Coba refresh halaman."))
+      .finally(() => setLoadingProducts(false));
+  }, []);
+
+  // Daftar kategori diambil otomatis dari data produk
+  const categories = ["All", ...new Set(products.map((p) => p.category))];
 
   // Filter produk berdasarkan kategori dan kata pencarian
   const filteredProducts = products.filter((product) => {
@@ -74,7 +88,10 @@ export default function SelectItem() {
 
         {/* Daftar produk */}
         <main>
-          {filteredProducts.length === 0 && (
+          {loadingProducts && <p className="empty">Memuat menu...</p>}
+          {loadError && <p className="empty">{loadError}</p>}
+
+          {!loadingProducts && !loadError && filteredProducts.length === 0 && (
             <p className="empty">Produk tidak ditemukan.</p>
           )}
 
@@ -89,12 +106,10 @@ export default function SelectItem() {
                   <p className="product-desc">{product.description}</p>
                   <div className="product-actions">
                     {quantity === 0 ? (
-                      // Belum dipilih: tampilkan tombol Add +
                       <button className="btn" onClick={() => addItem(product)}>
                         Add +
                       </button>
                     ) : (
-                      // Sudah dipilih: tampilkan tombol − jumlah +
                       <div className="qty-control">
                         <button
                           onClick={() => updateQuantity(product.id, quantity - 1)}
